@@ -40,7 +40,7 @@ type APIServerSpec struct {
 type JanitorSpec struct {
 	Kind          string             `json:"kind"`
 	TTL           metav1.Duration    `json:"ttl"`
-	Elasticsearch *ElasticsearchSpec `json:"elasticsearch,omitempty,omitempty"`
+	Elasticsearch *ElasticsearchSpec `json:"elasticsearch,omitempty"`
 	InfluxDB      *InfluxDBSpec      `json:"influxdb,omitempty"`
 }
 
@@ -153,12 +153,12 @@ type LocalSpec struct {
 
 type S3Spec struct {
 	Endpoint string `json:"endpoint,omitempty"`
-	Bucket   string `json:"bucket,omiempty"`
+	Bucket   string `json:"bucket,omitempty"`
 	Prefix   string `json:"prefix,omitempty"`
 }
 
 type GCSSpec struct {
-	Bucket string `json:"bucket,omiempty"`
+	Bucket string `json:"bucket,omitempty"`
 	Prefix string `json:"prefix,omitempty"`
 }
 

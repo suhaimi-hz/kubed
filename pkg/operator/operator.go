@@ -321,14 +321,13 @@ func (op *Operator) RunElasticsearchCleaner() error {
 			var authInfo *config.JanitorAuthInfo
 
 			if j.Elasticsearch.SecretName != "" {
-				secret, err := op.KubeClient.CoreV1().Secrets(op.Opt.OperatorNamespace).
+				secret, err := op.KubeClient.CoreV1().
+					Secrets(op.Opt.OperatorNamespace).
 					Get(j.Elasticsearch.SecretName, metav1.GetOptions{})
-				if err != nil && !kerr.IsNotFound(err) {
+				if err != nil {
 					return err
 				}
-				if secret != nil {
-					authInfo = config.LoadJanitorAuthInfo(secret.Data)
-				}
+				authInfo = config.LoadJanitorAuthInfo(secret.Data)
 			}
 
 			janitor := es.Janitor{Spec: *j.Elasticsearch, AuthInfo: authInfo, TTL: j.TTL.Duration}

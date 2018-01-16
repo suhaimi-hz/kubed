@@ -48,8 +48,8 @@ import:
   version: v1.0.0
 - package: github.com/yudai/gojsondiff
   version: 1.0.0
-- package: gopkg.in/olivere/elastic.v3
-  version: v3.0.59
+- package: gopkg.in/olivere/elastic.v5
+  version: v5.0.61
 - package: k8s.io/api
   version: kubernetes-1.8.3
 - package: k8s.io/apimachinery
