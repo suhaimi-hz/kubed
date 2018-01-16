@@ -1,5 +1,5 @@
-hash: ac85838391df03ab654a123785245369d49e4cfdb5f7543d6c3726b84f87695b
-updated: 2018-01-16T11:20:13.983264159-08:00
+hash: 1b544b85f647e2dc21e6adaca861fd2d7e31ff8d3c778c46f03eed721d5de263
+updated: 2018-01-16T11:25:12.370402853-08:00
 imports:
 - name: cloud.google.com/go
   version: 44b3a7d2be2df066b6625227cf4e4988d35a2cd1
@@ -185,9 +185,7 @@ imports:
 - name: github.com/codeskyblue/go-sh
   version: cf804ac79dffabb6b16342e24362cc744afc144f
 - name: github.com/coreos/prometheus-operator
-  version: cbdd1b519796673cd02d53b0e21999acbcbfe6e4
-  repo: https://github.com/appscode/prometheus-operator.git
-  vcs: git
+  version: 0b87bfa150cf57bdc7b081d9b48ef48a9350b47b
   subpackages:
   - pkg/client/monitoring/v1
 - name: github.com/cpuguy83/go-md2man
