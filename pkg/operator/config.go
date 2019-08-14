@@ -11,21 +11,15 @@ import (
 	resource_indexer "github.com/appscode/kubed/pkg/registry/resource"
 	"github.com/appscode/kubed/pkg/syncer"
 	srch_cs "github.com/appscode/searchlight/client/clientset/versioned"
-	searchlightinformers "github.com/appscode/searchlight/client/informers/externalversions"
 	vcs "github.com/appscode/voyager/client/clientset/versioned"
-	voyagerinformers "github.com/appscode/voyager/client/informers/externalversions"
-	prominformers "github.com/coreos/prometheus-operator/pkg/client/informers/externalversions"
 	pcm "github.com/coreos/prometheus-operator/pkg/client/versioned"
 	"github.com/robfig/cron/v3"
-	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"kmodules.xyz/client-go/discovery"
 	"kmodules.xyz/client-go/tools/fsnotify"
 	kcs "kubedb.dev/apimachinery/client/clientset/versioned"
-	kubedbinformers "kubedb.dev/apimachinery/client/informers/externalversions"
 	scs "stash.appscode.dev/stash/client/clientset/versioned"
-	stashinformers "stash.appscode.dev/stash/client/informers/externalversions"
 )
 
 type Config struct {
@@ -65,11 +59,6 @@ func (c *OperatorConfig) New() (*Operator, error) {
 		ClientConfig:      c.ClientConfig,
 		DynamicClient : c.DynamicClient,
 		KubeClient:        c.KubeClient,
-		VoyagerClient:     c.VoyagerClient,
-		SearchlightClient: c.SearchlightClient,
-		StashClient:       c.StashClient,
-		KubeDBClient:      c.KubeDBClient,
-		PromClient:        c.PromClient,
 	}
 
 	op.recorder = eventer.NewEventRecorder(op.KubeClient, "kubed")
@@ -94,27 +83,8 @@ func (c *OperatorConfig) New() (*Operator, error) {
 	// ---------------------------
 	op.Factory = dynamicinformer.NewDynamicSharedInformerFactory(op.DynamicClient, c.ResyncPeriod)
 
-	op.kubeInformerFactory = informers.NewSharedInformerFactory(op.KubeClient, c.ResyncPeriod)
-	op.voyagerInformerFactory = voyagerinformers.NewSharedInformerFactory(op.VoyagerClient, c.ResyncPeriod)
-	op.stashInformerFactory = stashinformers.NewSharedInformerFactory(op.StashClient, c.ResyncPeriod)
-	op.searchlightInformerFactory = searchlightinformers.NewSharedInformerFactory(op.SearchlightClient, c.ResyncPeriod)
-	op.kubedbInformerFactory = kubedbinformers.NewSharedInformerFactory(op.KubeDBClient, c.ResyncPeriod)
-	op.promInformerFactory = prominformers.NewSharedInformerFactory(op.PromClient, c.ResyncPeriod)
 	// ---------------------------
-	op.setupWorkloadInformers()
-	op.setupNetworkInformers()
-	op.setupConfigInformers()
-	op.setupRBACInformers()
-	op.setupCoreInformers()
-	op.setupEventInformers()
-	op.setupCertificateInformers()
-	op.setupStorageInformers()
-	// ---------------------------
-	op.setupVoyagerInformers()
-	op.setupStashInformers()
-	op.setupSearchlightInformers()
-	op.setupKubeDBInformers()
-	op.setupPrometheusInformers()
+	op.setupInformers()
 	// ---------------------------
 
 	if err := op.Configure(); err != nil {

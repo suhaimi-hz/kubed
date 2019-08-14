@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"fmt"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"os"
 	"path/filepath"
@@ -29,12 +30,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/robfig/cron/v3"
 	"gomodules.xyz/envconfig"
-	apps "k8s.io/api/apps/v1"
-	batch "k8s.io/api/batch/v1"
 	certificates "k8s.io/api/certificates/v1beta1"
 	core "k8s.io/api/core/v1"
-	extensions "k8s.io/api/extensions/v1beta1"
-	rbac "k8s.io/api/rbac/v1"
 	storage_v1 "k8s.io/api/storage/v1"
 	_ "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
 	kerr "k8s.io/apimachinery/pkg/api/errors"
@@ -78,25 +75,13 @@ type Operator struct {
 
 	cron *cron.Cron
 
+	KubeClient        kubernetes.Interface
 	DynamicClient dynamic.Interface
+
 	Mapper meta.RESTMapper
 	Factory       dynamicinformer.DynamicSharedInformerFactory
 	Listers       map[schema.GroupVersionResource]dynamiclister.Lister
 	syncedFns     []cache.InformerSynced
-
-	KubeClient        kubernetes.Interface
-	VoyagerClient     vcs.Interface
-	SearchlightClient srch_cs.Interface
-	StashClient       scs.Interface
-	KubeDBClient      kcs.Interface
-	PromClient        pcm.Interface
-
-	kubeInformerFactory        informers.SharedInformerFactory
-	voyagerInformerFactory     voyagerinformers.SharedInformerFactory
-	stashInformerFactory       stashinformers.SharedInformerFactory
-	searchlightInformerFactory searchlightinformers.SharedInformerFactory
-	kubedbInformerFactory      kubedbinformers.SharedInformerFactory
-	promInformerFactory        prominformers.SharedInformerFactory
 
 	Indexer *indexers.ResourceIndexer
 
@@ -161,7 +146,7 @@ func (op *Operator) Configure() error {
 	return nil
 }
 
-func (op *Operator) setupWorkloadInformers() {
+func (op *Operator) setupInformers() {
 	resources := []schema.GroupVersionResource{
 		schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "replicationcontrollers"},
@@ -169,6 +154,19 @@ func (op *Operator) setupWorkloadInformers() {
 		schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"},
 		schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"},
 		schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobd"},
+
+		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "Service"},
+		schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "Ingress"},
+		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "NetworkPolicy"},
+
+		schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"},
+		schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"},
+		schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"},
+		schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"},
+
+		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
+		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "limitranges"},
+		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "serviceaccounts"},
 	}
 
 	for _, gvr := range resources {
@@ -176,21 +174,8 @@ func (op *Operator) setupWorkloadInformers() {
 		if gvk, err := op.Mapper.KindFor(gvr); err == nil {
 			op.addEventHandlers(i, gvk)
 		}
+		op.syncedFns = append(op.syncedFns, i.HasSynced)
 	}
-
-
-
-}
-
-func (op *Operator) setupNetworkInformers() {
-	svcInformer := op.kubeInformerFactory.Core().V1().Services().Informer()
-	op.addEventHandlers(svcInformer, core.SchemeGroupVersion.WithKind("Service"))
-
-	ingressInformer := op.kubeInformerFactory.Extensions().V1beta1().Ingresses().Informer()
-	op.addEventHandlers(ingressInformer, extensions.SchemeGroupVersion.WithKind("Ingress"))
-
-	netPolicyInformer := op.kubeInformerFactory.Networking().V1().NetworkPolicies().Informer()
-	op.addEventHandlers(netPolicyInformer, core.SchemeGroupVersion.WithKind("NetworkPolicy"))
 }
 
 func (op *Operator) setupConfigInformers() {
@@ -223,31 +208,6 @@ func (op *Operator) setupConfigInformers() {
 	nsInformer.AddEventHandler(op.configSyncer.NamespaceHandler())
 }
 
-func (op *Operator) setupRBACInformers() {
-	clusterRoleInformer := op.kubeInformerFactory.Rbac().V1().ClusterRoles().Informer()
-	op.addEventHandlers(clusterRoleInformer, rbac.SchemeGroupVersion.WithKind("ClusterRole"))
-
-	clusterRoleBindingInformer := op.kubeInformerFactory.Rbac().V1().ClusterRoleBindings().Informer()
-	op.addEventHandlers(clusterRoleBindingInformer, rbac.SchemeGroupVersion.WithKind("ClusterRoleBinding"))
-
-	roleInformer := op.kubeInformerFactory.Rbac().V1().Roles().Informer()
-	op.addEventHandlers(roleInformer, rbac.SchemeGroupVersion.WithKind("Role"))
-
-	roleBindingInformer := op.kubeInformerFactory.Rbac().V1().RoleBindings().Informer()
-	op.addEventHandlers(roleBindingInformer, rbac.SchemeGroupVersion.WithKind("RoleBinding"))
-}
-
-func (op *Operator) setupCoreInformers() {
-	nodeInformer := op.kubeInformerFactory.Core().V1().Nodes().Informer()
-	op.addEventHandlers(nodeInformer, core.SchemeGroupVersion.WithKind("Node"))
-
-	limitRangeInformer := op.kubeInformerFactory.Core().V1().LimitRanges().Informer()
-	op.addEventHandlers(limitRangeInformer, core.SchemeGroupVersion.WithKind("LimitRange"))
-
-	saInformer := op.kubeInformerFactory.Core().V1().ServiceAccounts().Informer()
-	op.addEventHandlers(saInformer, core.SchemeGroupVersion.WithKind("ServiceAccount"))
-}
-
 func (op *Operator) setupEventInformers() {
 	eventInformer := op.kubeInformerFactory.InformerFor(&core.Event{}, func(client kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
 		return core_informers.NewFilteredEventInformer(
@@ -264,94 +224,55 @@ func (op *Operator) setupEventInformers() {
 }
 
 func (op *Operator) setupCertificateInformers() {
-	csrInformer := op.kubeInformerFactory.Certificates().V1beta1().CertificateSigningRequests().Informer()
 	op.addEventHandlers(csrInformer, certificates.SchemeGroupVersion.WithKind("CertificateSigningRequest"))
 }
 
 func (op *Operator) setupStorageInformers() {
-	pvInformer := op.kubeInformerFactory.Core().V1().PersistentVolumes().Informer()
 	op.addEventHandlers(pvInformer, core.SchemeGroupVersion.WithKind("PersistentVolume"))
-
-	pvcInformer := op.kubeInformerFactory.Core().V1().PersistentVolumeClaims().Informer()
 	op.addEventHandlers(pvcInformer, core.SchemeGroupVersion.WithKind("PersistentVolumeClaim"))
-
-	storageClassInformer := op.kubeInformerFactory.Storage().V1().StorageClasses().Informer()
 	op.addEventHandlers(storageClassInformer, storage_v1.SchemeGroupVersion.WithKind("StorageClass"))
 }
 
 func (op *Operator) setupVoyagerInformers() {
 	if discovery.IsPreferredAPIResource(op.KubeClient.Discovery(), voyager_api.SchemeGroupVersion.String(), voyager_api.ResourceKindIngress) {
-		voyagerIngressInformer := op.voyagerInformerFactory.Voyager().V1beta1().Ingresses().Informer()
 		op.addEventHandlers(voyagerIngressInformer, voyager_api.SchemeGroupVersion.WithKind(voyager_api.ResourceKindIngress))
-
-		voyagerCertificateInformer := op.voyagerInformerFactory.Voyager().V1beta1().Certificates().Informer()
 		op.addEventHandlers(voyagerCertificateInformer, voyager_api.SchemeGroupVersion.WithKind(voyager_api.ResourceKindCertificate))
 	}
 }
 
 func (op *Operator) setupStashInformers() {
 	if discovery.IsPreferredAPIResource(op.KubeClient.Discovery(), stash_api.SchemeGroupVersion.String(), stash_api.ResourceKindRestic) {
-		resticsInformer := op.stashInformerFactory.Stash().V1alpha1().Restics().Informer()
 		op.addEventHandlers(resticsInformer, stash_api.SchemeGroupVersion.WithKind(stash_api.ResourceKindRestic))
-
-		recoveryInformer := op.stashInformerFactory.Stash().V1alpha1().Recoveries().Informer()
 		op.addEventHandlers(recoveryInformer, stash_api.SchemeGroupVersion.WithKind(stash_api.ResourceKindRecovery))
 	}
 }
 
 func (op *Operator) setupSearchlightInformers() {
 	if discovery.IsPreferredAPIResource(op.KubeClient.Discovery(), searchlight_api.SchemeGroupVersion.String(), searchlight_api.ResourceKindClusterAlert) {
-		clusterAlertInformer := op.searchlightInformerFactory.Monitoring().V1alpha1().ClusterAlerts().Informer()
 		op.addEventHandlers(clusterAlertInformer, searchlight_api.SchemeGroupVersion.WithKind(searchlight_api.ResourceKindClusterAlert))
-
-		nodeAlertInformer := op.searchlightInformerFactory.Monitoring().V1alpha1().NodeAlerts().Informer()
 		op.addEventHandlers(nodeAlertInformer, searchlight_api.SchemeGroupVersion.WithKind(searchlight_api.ResourceKindNodeAlert))
-
-		podAlertInformer := op.searchlightInformerFactory.Monitoring().V1alpha1().PodAlerts().Informer()
 		op.addEventHandlers(podAlertInformer, searchlight_api.SchemeGroupVersion.WithKind(searchlight_api.ResourceKindPodAlert))
 	}
 }
 
 func (op *Operator) setupKubeDBInformers() {
 	if discovery.IsPreferredAPIResource(op.KubeClient.Discovery(), kubedb_api.SchemeGroupVersion.String(), kubedb_api.ResourceKindPostgres) {
-		pgInformer := op.kubedbInformerFactory.Kubedb().V1alpha1().Postgreses().Informer()
 		op.addEventHandlers(pgInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindPostgres))
-
-		esInformer := op.kubedbInformerFactory.Kubedb().V1alpha1().Elasticsearches().Informer()
 		op.addEventHandlers(esInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindElasticsearch))
-
-		myInformer := op.kubedbInformerFactory.Kubedb().V1alpha1().MySQLs().Informer()
 		op.addEventHandlers(myInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindMySQL))
-
-		mgInformer := op.kubedbInformerFactory.Kubedb().V1alpha1().MongoDBs().Informer()
 		op.addEventHandlers(mgInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindMongoDB))
-
-		rdInformer := op.kubedbInformerFactory.Kubedb().V1alpha1().Redises().Informer()
 		op.addEventHandlers(rdInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindRedis))
-
-		mcInformer := op.kubedbInformerFactory.Kubedb().V1alpha1().Memcacheds().Informer()
 		op.addEventHandlers(mcInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindMemcached))
-
-		dbSnapshotInformer := op.kubedbInformerFactory.Kubedb().V1alpha1().Snapshots().Informer()
 		op.addEventHandlers(dbSnapshotInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindSnapshot))
-
-		dormantDatabaseInformer := op.kubedbInformerFactory.Kubedb().V1alpha1().DormantDatabases().Informer()
 		op.addEventHandlers(dormantDatabaseInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindDormantDatabase))
 	}
 }
 
 func (op *Operator) setupPrometheusInformers() {
 	if discovery.IsPreferredAPIResource(op.KubeClient.Discovery(), promapi.SchemeGroupVersion.String(), promapi.PrometheusesKind) {
-		promInf := op.promInformerFactory.Monitoring().V1().Prometheuses().Informer()
 		op.addEventHandlers(promInf, promapi.SchemeGroupVersion.WithKind(promapi.PrometheusesKind))
-
-		ruleInf := op.promInformerFactory.Monitoring().V1().PrometheusRules().Informer()
 		op.addEventHandlers(ruleInf, promapi.SchemeGroupVersion.WithKind(promapi.PrometheusRuleKind))
-
-		smonInf := op.promInformerFactory.Monitoring().V1().ServiceMonitors().Informer()
 		op.addEventHandlers(smonInf, promapi.SchemeGroupVersion.WithKind(promapi.ServiceMonitorsKind))
-
-		amgrInf := op.promInformerFactory.Monitoring().V1().Alertmanagers().Informer()
 		op.addEventHandlers(amgrInf, promapi.SchemeGroupVersion.WithKind(promapi.AlertmanagersKind))
 	}
 }
@@ -383,61 +304,9 @@ func (op *Operator) getLoader() (envconfig.LoaderFunc, error) {
 }
 
 func (op *Operator) RunWatchers(stopCh <-chan struct{}) {
-	op.kubeInformerFactory.Start(stopCh)
-	op.voyagerInformerFactory.Start(stopCh)
-	op.stashInformerFactory.Start(stopCh)
-	op.searchlightInformerFactory.Start(stopCh)
-	op.kubedbInformerFactory.Start(stopCh)
-	op.promInformerFactory.Start(stopCh)
-
-	var res map[reflect.Type]bool
-
-	res = op.kubeInformerFactory.WaitForCacheSync(stopCh)
-	for _, v := range res {
-		if !v {
-			runtime.HandleError(errors.Errorf("timed out waiting for caches to sync"))
-			return
-		}
-	}
-
-	res = op.voyagerInformerFactory.WaitForCacheSync(stopCh)
-	for _, v := range res {
-		if !v {
-			runtime.HandleError(errors.Errorf("timed out waiting for caches to sync"))
-			return
-		}
-	}
-
-	res = op.stashInformerFactory.WaitForCacheSync(stopCh)
-	for _, v := range res {
-		if !v {
-			runtime.HandleError(errors.Errorf("timed out waiting for caches to sync"))
-			return
-		}
-	}
-
-	res = op.searchlightInformerFactory.WaitForCacheSync(stopCh)
-	for _, v := range res {
-		if !v {
-			runtime.HandleError(errors.Errorf("timed out waiting for caches to sync"))
-			return
-		}
-	}
-
-	res = op.kubedbInformerFactory.WaitForCacheSync(stopCh)
-	for _, v := range res {
-		if !v {
-			runtime.HandleError(errors.Errorf("timed out waiting for caches to sync"))
-			return
-		}
-	}
-
-	res = op.promInformerFactory.WaitForCacheSync(stopCh)
-	for _, v := range res {
-		if !v {
-			runtime.HandleError(errors.Errorf("timed out waiting for caches to sync"))
-			return
-		}
+	op.Factory.Start(stopCh)
+	if ok := cache.WaitForCacheSync(stopCh, op.syncedFns...); !ok {
+		log.Errorf("failed to wait for caches to sync")
 	}
 }
 
