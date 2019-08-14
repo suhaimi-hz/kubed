@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"k8s.io/apimachinery/pkg/api/meta"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -42,6 +43,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/dynamic/dynamiclister"
 	"k8s.io/client-go/informers"
 	core_informers "k8s.io/client-go/informers/core/v1"
@@ -76,9 +78,10 @@ type Operator struct {
 
 	cron *cron.Cron
 
-	dynamicclient dynamic.Interface
-	crdListers    map[schema.GroupVersionResource]dynamiclister.Lister
-	crdWorkers    map[schema.GroupVersionResource]*queue.Worker
+	DynamicClient dynamic.Interface
+	Mapper meta.RESTMapper
+	Factory       dynamicinformer.DynamicSharedInformerFactory
+	Listers       map[schema.GroupVersionResource]dynamiclister.Lister
 	syncedFns     []cache.InformerSynced
 
 	KubeClient        kubernetes.Interface
@@ -159,25 +162,24 @@ func (op *Operator) Configure() error {
 }
 
 func (op *Operator) setupWorkloadInformers() {
-	deploymentInformer := op.kubeInformerFactory.Apps().V1().Deployments().Informer()
-	op.addEventHandlers(deploymentInformer, apps.SchemeGroupVersion.WithKind("Deployment"))
+	resources := []schema.GroupVersionResource{
+		schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "replicationcontrollers"},
+		schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"},
+		schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"},
+		schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"},
+		schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobd"},
+	}
 
-	rcInformer := op.kubeInformerFactory.Core().V1().ReplicationControllers().Informer()
-	op.addEventHandlers(rcInformer, core.SchemeGroupVersion.WithKind("ReplicationController"))
+	for _, gvr := range resources {
+		i := op.Factory.ForResource(gvr).Informer()
+		if gvk, err := op.Mapper.KindFor(gvr); err == nil {
+			op.addEventHandlers(i, gvk)
+		}
+	}
 
-	rsInformer := op.kubeInformerFactory.Apps().V1().ReplicaSets().Informer()
-	op.addEventHandlers(rsInformer, apps.SchemeGroupVersion.WithKind("ReplicaSet"))
 
-	daemonSetInformer := op.kubeInformerFactory.Apps().V1().DaemonSets().Informer()
-	op.addEventHandlers(daemonSetInformer, apps.SchemeGroupVersion.WithKind("DaemonSet"))
 
-	statefulSetInformer := op.kubeInformerFactory.Apps().V1().StatefulSets().Informer()
-	op.addEventHandlers(statefulSetInformer, apps.SchemeGroupVersion.WithKind("StatefulSet"))
-
-	jobInformer := op.kubeInformerFactory.Batch().V1().Jobs().Informer()
-	op.addEventHandlers(jobInformer, batch.SchemeGroupVersion.WithKind("Job"))
-
-	op.kubeInformerFactory.Core().V1().Pods().Informer()
 }
 
 func (op *Operator) setupNetworkInformers() {

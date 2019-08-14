@@ -1,6 +1,8 @@
 package operator
 
 import (
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 	"path/filepath"
 	"time"
 
@@ -38,6 +40,7 @@ type OperatorConfig struct {
 	Config
 
 	ClientConfig      *rest.Config
+	DynamicClient dynamic.Interface
 	KubeClient        kubernetes.Interface
 	VoyagerClient     vcs.Interface
 	SearchlightClient srch_cs.Interface
@@ -60,6 +63,7 @@ func (c *OperatorConfig) New() (*Operator, error) {
 	op := &Operator{
 		Config:            c.Config,
 		ClientConfig:      c.ClientConfig,
+		DynamicClient : c.DynamicClient,
 		KubeClient:        c.KubeClient,
 		VoyagerClient:     c.VoyagerClient,
 		SearchlightClient: c.SearchlightClient,
@@ -88,6 +92,8 @@ func (c *OperatorConfig) New() (*Operator, error) {
 	}
 
 	// ---------------------------
+	op.Factory = dynamicinformer.NewDynamicSharedInformerFactory(op.DynamicClient, c.ResyncPeriod)
+
 	op.kubeInformerFactory = informers.NewSharedInformerFactory(op.KubeClient, c.ResyncPeriod)
 	op.voyagerInformerFactory = voyagerinformers.NewSharedInformerFactory(op.VoyagerClient, c.ResyncPeriod)
 	op.stashInformerFactory = stashinformers.NewSharedInformerFactory(op.StashClient, c.ResyncPeriod)
