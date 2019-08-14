@@ -41,6 +41,8 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamiclister"
 	"k8s.io/client-go/informers"
 	core_informers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -73,6 +75,11 @@ type Operator struct {
 	configSyncer   *syncer.ConfigSyncer
 
 	cron *cron.Cron
+
+	dynamicclient dynamic.Interface
+	crdListers    map[schema.GroupVersionResource]dynamiclister.Lister
+	crdWorkers    map[schema.GroupVersionResource]*queue.Worker
+	syncedFns     []cache.InformerSynced
 
 	KubeClient        kubernetes.Interface
 	VoyagerClient     vcs.Interface

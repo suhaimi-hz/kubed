@@ -3,9 +3,11 @@ module github.com/appscode/kubed
 go 1.12
 
 require (
+	github.com/Azure/azure-pipeline-go v0.1.9 // indirect
+	github.com/Azure/azure-storage-blob-go v0.6.0 // indirect
 	github.com/RoaringBitmap/roaring v0.0.0-20180103163510-cefad6e4f79d // indirect
 	github.com/Smerity/govarint v0.0.0-20150407073650-7265e41f48f1 // indirect
-	github.com/appscode/go v0.0.0-20190722173419-e454bf744023
+	github.com/appscode/go v0.0.0-20190808133642-1d4ef1f1c1e0
 	github.com/appscode/searchlight v0.0.0-20190604163604-8a6c4c21504d
 	github.com/appscode/voyager v0.0.0-20190722051248-5f4cb23f00da
 	github.com/blevesearch/bleve v0.7.0
@@ -25,10 +27,12 @@ require (
 	github.com/glycerine/goconvey v0.0.0-20190410193231-58a59202ab31 // indirect
 	github.com/go-openapi/spec v0.19.0
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
-	github.com/gophercloud/gophercloud v0.0.0-20190516144603-ad4210895ed0 // indirect
+	github.com/google/martian v2.1.1-0.20190517191504-25dcb96d9e51+incompatible // indirect
 	github.com/influxdata/influxdb v1.5.3
+	github.com/jackc/pgx v3.3.0+incompatible // indirect
 	github.com/jmhodges/levigo v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.6
+	github.com/lib/pq v1.1.0 // indirect
 	github.com/mschoch/smat v0.0.0-20160514031455-90eadee771ae // indirect
 	github.com/onsi/ginkgo v1.8.0
 	github.com/onsi/gomega v1.5.0
@@ -58,7 +62,7 @@ require (
 	k8s.io/client-go v11.0.1-0.20190409021438-1a26190bd76a+incompatible
 	k8s.io/kube-aggregator v0.0.0-20190515024249-81a6edcf70be
 	k8s.io/kube-openapi v0.0.0-20190510232812-a01b7d5d6c22
-	kmodules.xyz/client-go v0.0.0-20190715080709-7162a6c90b04
+	kmodules.xyz/client-go v0.0.0-20190808141354-bbb9e14f60ab
 	kmodules.xyz/monitoring-agent-api v0.0.0-20190513065523-186af167f817
 	kmodules.xyz/objectstore-api v0.0.0-20190718002052-da668b440b0b
 	kmodules.xyz/webhook-runtime v0.0.0-20190715115250-a84fbf77dd30
@@ -69,6 +73,7 @@ require (
 replace (
 	github.com/Azure/go-autorest => github.com/Azure/go-autorest/autorest v0.5.0
 	github.com/prometheus/client_golang => github.com/prometheus/client_golang v0.9.4
+	gomodules.xyz/envsubst => gomodules.xyz/envsubst v0.1.0
 	k8s.io/api => k8s.io/api v0.0.0-20190313235455-40a48860b5ab
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.0.0-20190315093550-53c4693659ed
 	k8s.io/apimachinery => github.com/kmodules/apimachinery v0.0.0-20190508045248-a52a97a7a2bf
