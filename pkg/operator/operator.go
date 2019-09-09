@@ -1,13 +1,13 @@
 package operator
 
 import (
-	"fmt"
-	"k8s.io/apimachinery/pkg/api/meta"
+	"github.com/appscode/voyager/apis/voyager"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"time"
+
+	"k8s.io/apimachinery/pkg/api/meta"
 
 	"github.com/appscode/go/log"
 	api "github.com/appscode/kubed/apis/kubed/v1alpha1"
@@ -18,31 +18,20 @@ import (
 	indexers "github.com/appscode/kubed/pkg/registry/resource"
 	"github.com/appscode/kubed/pkg/syncer"
 	searchlight_api "github.com/appscode/searchlight/apis/monitoring/v1alpha1"
-	srch_cs "github.com/appscode/searchlight/client/clientset/versioned"
-	searchlightinformers "github.com/appscode/searchlight/client/informers/externalversions"
 	voyager_api "github.com/appscode/voyager/apis/voyager/v1beta1"
-	vcs "github.com/appscode/voyager/client/clientset/versioned"
-	voyagerinformers "github.com/appscode/voyager/client/informers/externalversions"
 	shell "github.com/codeskyblue/go-sh"
 	promapi "github.com/coreos/prometheus-operator/pkg/apis/monitoring/v1"
-	prominformers "github.com/coreos/prometheus-operator/pkg/client/informers/externalversions"
-	pcm "github.com/coreos/prometheus-operator/pkg/client/versioned"
-	"github.com/pkg/errors"
 	"github.com/robfig/cron/v3"
 	"gomodules.xyz/envconfig"
-	certificates "k8s.io/api/certificates/v1beta1"
 	core "k8s.io/api/core/v1"
-	storage_v1 "k8s.io/api/storage/v1"
 	_ "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/typed/apiextensions/v1beta1"
 	kerr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/dynamic/dynamiclister"
-	"k8s.io/client-go/informers"
 	core_informers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -50,16 +39,13 @@ import (
 	"k8s.io/client-go/tools/record"
 	_ "kmodules.xyz/client-go/apiextensions/v1beta1"
 	"kmodules.xyz/client-go/discovery"
+	dd "k8s.io/client-go/discovery"
 	"kmodules.xyz/client-go/tools/backup"
 	"kmodules.xyz/client-go/tools/fsnotify"
 	"kmodules.xyz/client-go/tools/queue"
 	storage "kmodules.xyz/objectstore-api/osm"
 	kubedb_api "kubedb.dev/apimachinery/apis/kubedb/v1alpha1"
-	kcs "kubedb.dev/apimachinery/client/clientset/versioned"
-	kubedbinformers "kubedb.dev/apimachinery/client/informers/externalversions"
 	stash_api "stash.appscode.dev/stash/apis/stash/v1alpha1"
-	scs "stash.appscode.dev/stash/client/clientset/versioned"
-	stashinformers "stash.appscode.dev/stash/client/informers/externalversions"
 )
 
 type Operator struct {
@@ -75,13 +61,14 @@ type Operator struct {
 
 	cron *cron.Cron
 
-	KubeClient        kubernetes.Interface
+	KubeClient    kubernetes.Interface
 	DynamicClient dynamic.Interface
+	DiscClient dd.CachedDiscoveryInterface
 
-	Mapper meta.RESTMapper
-	Factory       dynamicinformer.DynamicSharedInformerFactory
-	Listers       map[schema.GroupVersionResource]dynamiclister.Lister
-	syncedFns     []cache.InformerSynced
+	Mapper    meta.RESTMapper
+	Factory   dynamicinformer.DynamicSharedInformerFactory
+	Listers   map[schema.GroupVersionResource]dynamiclister.Lister
+	syncedFns []cache.InformerSynced
 
 	Indexer *indexers.ResourceIndexer
 
@@ -167,6 +154,40 @@ func (op *Operator) setupInformers() {
 		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
 		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "limitranges"},
 		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "serviceaccounts"},
+
+		schema.GroupVersionResource{Group: "certificates.k8s.io", Version: "v1", Resource: "CertificateSigningRequest"},
+		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumes"},
+		schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
+		schema.GroupVersionResource{Group: "storage.k8s.io", Version: "v1", Resource: "storageclasses"},
+	}
+	if discovery.IsPreferredAPIResource(op.DiscClient, schema.GroupVersion{Group: "voyager.appscode.com", Version: "v1beta1"}.String(), "Ingress") {
+		resources = append(resources, schema.GroupVersionResource{Group: "voyager.appscode.com", Version: "v1beta1", Resource: "ingresses"})
+		resources = append(resources, schema.GroupVersionResource{Group: "voyager.appscode.com", Version: "v1beta1", Resource: "certificates"})
+	}
+	if discovery.IsPreferredAPIResource(op.DiscClient, stash_api.SchemeGroupVersion.String(), stash_api.ResourceKindRestic) {
+		op.addEventHandlers(resticsInformer, stash_api.SchemeGroupVersion.WithKind(stash_api.ResourceKindRestic))
+		op.addEventHandlers(recoveryInformer, stash_api.SchemeGroupVersion.WithKind(stash_api.ResourceKindRecovery))
+	}
+	if discovery.IsPreferredAPIResource(op.DiscClient, searchlight_api.SchemeGroupVersion.String(), searchlight_api.ResourceKindClusterAlert) {
+		op.addEventHandlers(clusterAlertInformer, searchlight_api.SchemeGroupVersion.WithKind(searchlight_api.ResourceKindClusterAlert))
+		op.addEventHandlers(nodeAlertInformer, searchlight_api.SchemeGroupVersion.WithKind(searchlight_api.ResourceKindNodeAlert))
+		op.addEventHandlers(podAlertInformer, searchlight_api.SchemeGroupVersion.WithKind(searchlight_api.ResourceKindPodAlert))
+	}
+	if discovery.IsPreferredAPIResource(op.DiscClient, kubedb_api.SchemeGroupVersion.String(), kubedb_api.ResourceKindPostgres) {
+		op.addEventHandlers(pgInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindPostgres))
+		op.addEventHandlers(esInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindElasticsearch))
+		op.addEventHandlers(myInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindMySQL))
+		op.addEventHandlers(mgInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindMongoDB))
+		op.addEventHandlers(rdInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindRedis))
+		op.addEventHandlers(mcInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindMemcached))
+		op.addEventHandlers(dbSnapshotInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindSnapshot))
+		op.addEventHandlers(dormantDatabaseInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindDormantDatabase))
+	}
+	if discovery.IsPreferredAPIResource(op.DiscClient, promapi.SchemeGroupVersion.String(), promapi.PrometheusesKind) {
+		op.addEventHandlers(promInf, promapi.SchemeGroupVersion.WithKind(promapi.PrometheusesKind))
+		op.addEventHandlers(ruleInf, promapi.SchemeGroupVersion.WithKind(promapi.PrometheusRuleKind))
+		op.addEventHandlers(smonInf, promapi.SchemeGroupVersion.WithKind(promapi.ServiceMonitorsKind))
+		op.addEventHandlers(amgrInf, promapi.SchemeGroupVersion.WithKind(promapi.AlertmanagersKind))
 	}
 
 	for _, gvr := range resources {
@@ -223,58 +244,8 @@ func (op *Operator) setupEventInformers() {
 	eventInformer.AddEventHandler(op.eventProcessor)
 }
 
-func (op *Operator) setupCertificateInformers() {
-	op.addEventHandlers(csrInformer, certificates.SchemeGroupVersion.WithKind("CertificateSigningRequest"))
-}
-
-func (op *Operator) setupStorageInformers() {
-	op.addEventHandlers(pvInformer, core.SchemeGroupVersion.WithKind("PersistentVolume"))
-	op.addEventHandlers(pvcInformer, core.SchemeGroupVersion.WithKind("PersistentVolumeClaim"))
-	op.addEventHandlers(storageClassInformer, storage_v1.SchemeGroupVersion.WithKind("StorageClass"))
-}
-
 func (op *Operator) setupVoyagerInformers() {
-	if discovery.IsPreferredAPIResource(op.KubeClient.Discovery(), voyager_api.SchemeGroupVersion.String(), voyager_api.ResourceKindIngress) {
-		op.addEventHandlers(voyagerIngressInformer, voyager_api.SchemeGroupVersion.WithKind(voyager_api.ResourceKindIngress))
-		op.addEventHandlers(voyagerCertificateInformer, voyager_api.SchemeGroupVersion.WithKind(voyager_api.ResourceKindCertificate))
-	}
-}
 
-func (op *Operator) setupStashInformers() {
-	if discovery.IsPreferredAPIResource(op.KubeClient.Discovery(), stash_api.SchemeGroupVersion.String(), stash_api.ResourceKindRestic) {
-		op.addEventHandlers(resticsInformer, stash_api.SchemeGroupVersion.WithKind(stash_api.ResourceKindRestic))
-		op.addEventHandlers(recoveryInformer, stash_api.SchemeGroupVersion.WithKind(stash_api.ResourceKindRecovery))
-	}
-}
-
-func (op *Operator) setupSearchlightInformers() {
-	if discovery.IsPreferredAPIResource(op.KubeClient.Discovery(), searchlight_api.SchemeGroupVersion.String(), searchlight_api.ResourceKindClusterAlert) {
-		op.addEventHandlers(clusterAlertInformer, searchlight_api.SchemeGroupVersion.WithKind(searchlight_api.ResourceKindClusterAlert))
-		op.addEventHandlers(nodeAlertInformer, searchlight_api.SchemeGroupVersion.WithKind(searchlight_api.ResourceKindNodeAlert))
-		op.addEventHandlers(podAlertInformer, searchlight_api.SchemeGroupVersion.WithKind(searchlight_api.ResourceKindPodAlert))
-	}
-}
-
-func (op *Operator) setupKubeDBInformers() {
-	if discovery.IsPreferredAPIResource(op.KubeClient.Discovery(), kubedb_api.SchemeGroupVersion.String(), kubedb_api.ResourceKindPostgres) {
-		op.addEventHandlers(pgInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindPostgres))
-		op.addEventHandlers(esInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindElasticsearch))
-		op.addEventHandlers(myInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindMySQL))
-		op.addEventHandlers(mgInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindMongoDB))
-		op.addEventHandlers(rdInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindRedis))
-		op.addEventHandlers(mcInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindMemcached))
-		op.addEventHandlers(dbSnapshotInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindSnapshot))
-		op.addEventHandlers(dormantDatabaseInformer, kubedb_api.SchemeGroupVersion.WithKind(kubedb_api.ResourceKindDormantDatabase))
-	}
-}
-
-func (op *Operator) setupPrometheusInformers() {
-	if discovery.IsPreferredAPIResource(op.KubeClient.Discovery(), promapi.SchemeGroupVersion.String(), promapi.PrometheusesKind) {
-		op.addEventHandlers(promInf, promapi.SchemeGroupVersion.WithKind(promapi.PrometheusesKind))
-		op.addEventHandlers(ruleInf, promapi.SchemeGroupVersion.WithKind(promapi.PrometheusRuleKind))
-		op.addEventHandlers(smonInf, promapi.SchemeGroupVersion.WithKind(promapi.ServiceMonitorsKind))
-		op.addEventHandlers(amgrInf, promapi.SchemeGroupVersion.WithKind(promapi.AlertmanagersKind))
-	}
 }
 
 func (op *Operator) addEventHandlers(informer cache.SharedIndexInformer, gvk schema.GroupVersionKind) {

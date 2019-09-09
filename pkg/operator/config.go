@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"k8s.io/client-go/discovery/cached/disk"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"path/filepath"
@@ -82,7 +83,7 @@ func (c *OperatorConfig) New() (*Operator, error) {
 
 	// ---------------------------
 	op.Factory = dynamicinformer.NewDynamicSharedInformerFactory(op.DynamicClient, c.ResyncPeriod)
-
+disk.NewCachedDiscoveryClientForConfig()
 	// ---------------------------
 	op.setupInformers()
 	// ---------------------------
